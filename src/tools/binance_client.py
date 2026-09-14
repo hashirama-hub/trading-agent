@@ -50,11 +50,11 @@ class OrderResult(BaseModel):
 
 
 class PortfolioState(BaseModel):
-    equity: float
-    available_margin: float
-    positions: List[Dict]
-    daily_pnl: float
-    max_drawdown_today: float
+    equity: float = 0.0
+    available_margin: float = 0.0
+    positions: List[Dict] = Field(default_factory=list)
+    daily_pnl: float = 0.0
+    max_drawdown_today: float = 0.0
 
 
 class BinanceClient:
