@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+logs/
+.chroma/
+node_modules/
