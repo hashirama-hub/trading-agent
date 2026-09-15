@@ -1,5 +1,6 @@
+import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List
 
 from binance import AsyncClient
 
@@ -8,6 +9,8 @@ from src.tools.binance_client import MarketSnapshot, PortfolioState
 
 # Module-level client reference (set during initialization)
 binance_client: Optional[AsyncClient] = None
+
+TIMEFRAMES = ["5m", "15m", "1h", "4h"]
 
 
 async def get_market_data(
@@ -39,6 +42,30 @@ async def get_market_data(
         ask_vol=float(orderbook["asks"][0][1]),
         funding_rate=funding_rate,
     )
+
+
+async def get_multi_timeframe_data(symbol: str, timeframes: List[str] = None) -> Dict[str, MarketSnapshot]:
+    """Fetch market data for multiple timeframes in parallel.
+
+    Args:
+        symbol: Trading pair (e.g. "BTCUSDT")
+        timeframes: List of intervals (default: ["5m", "15m", "1h", "4h"])
+
+    Returns:
+        Dict mapping timeframe to MarketSnapshot
+    """
+    if timeframes is None:
+        timeframes = TIMEFRAMES
+
+    tasks = [get_market_data(symbol, interval=tf) for tf in timeframes]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    data = {}
+    for tf, result in zip(timeframes, results):
+        if isinstance(result, Exception):
+            continue
+        data[tf] = result
+    return data
 
 
 async def get_portfolio_state() -> PortfolioState:

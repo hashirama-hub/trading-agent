@@ -1,13 +1,12 @@
 import asyncio
 import logging
 import os
-import signal
 import sys
 
 from src.agent.graph import build_agent_graph
 from src.tools.binance_client import BinanceClient, PortfolioState as BSPortfolioState
-from src.tools.market_data import get_market_data, get_portfolio_state as get_market_portfolio
-from src.tools.technical_analysis import calculate_technicals, binance_client as ta_binance_client
+from src.tools.market_data import get_market_data, get_multi_timeframe_data, get_portfolio_state as get_market_portfolio
+from src.tools.technical_analysis import calculate_technicals, calculate_multi_timeframe_technicals, binance_client as ta_bc
 from src.risk.guard import RiskGuard
 from src.memory.store import AgentMemory
 from src.executor.paper_trading import PaperTradingEngine
@@ -34,12 +33,11 @@ async def main():
     )
     await binance_client.connect()
 
-    # Set module-level binance_client for tools
-    from src.tools.binance_client import BinanceClient as BC
-    from src.tools.market_data import binance_client as md_bc
-    from src.tools.technical_analysis import binance_client as ta_bc
-    md_bc = binance_client
-    ta_bc = binance_client
+    # Set module-level client references for tools
+    import src.tools.market_data as md_module
+    import src.tools.technical_analysis as ta_module
+    md_module.binance_client = binance_client
+    ta_module.binance_client = binance_client
 
     # Initialize memory
     memory = AgentMemory(
@@ -55,8 +53,11 @@ async def main():
     # Initialize paper trading engine
     paper_engine = PaperTradingEngine(initial_equity=portfolio_state.equity)
 
+    # Import and register trading tools for LangGraph
+    from src.agent.nodes import get_market_data as tool_get_market_data, get_portfolio_state as tool_get_portfolio_state, place_order
+    tools = [tool_get_market_data, tool_get_portfolio_state, place_order]
+
     # Build agent graph
-    tools = []
     graph = build_agent_graph(
         tools=tools,
         memory=memory,
@@ -81,16 +82,25 @@ async def main():
             portfolio = paper_engine.get_portfolio_state()
             risk_guard.portfolio = portfolio
 
-            # Get market data
+            # Get multi-timeframe market data
             market_data = {}
             symbols = ["BTCUSDT", "ETHUSDT"]
             for symbol in symbols:
                 try:
-                    snapshot = await get_market_data(symbol)
-                    market_data[symbol] = snapshot.dict()
-                    # Calculate technicals
-                    indicators = await calculate_technicals(symbol)
-                    market_data[symbol]["technicals"] = indicators.dict()
+                    mtf_data = await get_multi_timeframe_data(symbol)
+                    mtf_indicators = await calculate_multi_timeframe_technicals(symbol)
+
+                    market_data[symbol] = {
+                        "close": mtf_data.get("1h", list(mtf_data.values())[-1]).close if mtf_data else 0,
+                        "multi_timeframe": {
+                            tf: snap.dict() for tf, snap in mtf_data.items()
+                        },
+                        "technicals": mtf_indicators.current.dict(),
+                        "htf_trend": mtf_indicators.htf_trend,
+                        "htf_regime": mtf_indicators.htf_regime,
+                        "signal_alignment": mtf_indicators.signal_alignment,
+                        "mtf_summary": mtf_indicators.summary,
+                    }
                 except Exception as e:
                     logger.error(f"Error fetching {symbol}: {e}")
 
@@ -114,7 +124,7 @@ async def main():
 
             # Run agent graph
             try:
-                result = await graph.ainitial_run(initial_state)
+                result = await graph.ainvoke(initial_state)
             except Exception as e:
                 logger.error(f"Agent graph error: {e}")
                 memory.log_error(str(e))

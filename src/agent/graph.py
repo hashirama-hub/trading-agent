@@ -34,6 +34,10 @@ def build_agent_graph(
     graph.add_edge("observe", "reason")
     graph.add_edge("reason", "act")
     graph.add_edge("act", "reflect")
-    graph.add_conditional_edges("reflect", lambda s: s.get("_next", END), {END: END})
+    graph.add_conditional_edges(
+        "reflect",
+        lambda s: s.get("_next", "observe"),
+        {"observe": "observe", "END": END},
+    )
 
     return graph.compile(checkpointer=MemorySaver())
